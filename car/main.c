@@ -85,7 +85,7 @@ int main(void){
     PORTC &= ~(1 << TRIGPIN);                               // Set trigger low
 
     distance = timer * 0.034 / 2;
-
+    /*
     for(numb = 0; distance >= 1000; ++numb, distance -= 1000);
     uart_send_byte(numb + '0');
     for(numb = 0; distance >= 100; ++numb, distance -= 100);
@@ -95,11 +95,11 @@ int main(void){
     for(numb = 0; distance >= 1; ++numb, --distance);
     uart_send_byte(numb + '0');
     uart_send_byte('\n');
-    /*
+    */
     uart_send_byte((distance & 0xFF00) >> 8);
     uart_send_byte(distance & 0x00FF);
     uart_send_byte('\n');
-    */
+    
     _delay_ms(200);
   }
 }

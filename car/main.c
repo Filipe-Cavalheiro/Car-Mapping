@@ -3,9 +3,25 @@
 #include <util/delay.h>
 #include <stdint.h>
 
+//distance sensor
 #define TRIGPIN PORTC5
 #define ECHOPIN PORTC4
 #define RX_BUFFER_SIZE 128
+
+//motors
+#define EN_A PB0     // pin 8
+#define SPEED_A PD5  // pin 5
+#define DIR_A PD7    // pin 7
+
+#define EN_B PB1     // pin 9
+#define SPEED_B PD6  // pin 6
+#define DIR_B PB3    // pin 11
+
+//servo
+#define SERVO PD3
+#define SERVO_MIN 4
+#define SERVO_MED 12
+#define SERVO_MAX 20
 
 void uart_init(uint32_t baud);
 void uart_send_byte(uint8_t c);
@@ -73,7 +89,7 @@ uint8_t uart_read() {
   return data;
 }
 
-void start_distance_sensor(){
+void initialize_distance_sensor() {
   /*******************************************SENSOR CONTROLS*******************************************/
   DDRC |= (1 << TRIGPIN);  //A4 as trigger
 
@@ -94,7 +110,7 @@ void start_distance_sensor(){
   PORTC &= ~(1 << TRIGPIN);  // Set trigger low
 }
 
-uint16_t measure_distance(){
+uint16_t measure_distance() {
   PORTC &= ~(1 << TRIGPIN);
   _delay_us(2);
   PORTC |= (1 << TRIGPIN);   // Set trigger high
@@ -103,34 +119,139 @@ uint16_t measure_distance(){
   return timer * 0.034 / 2;
 }
 
-int main(void) {
-  uart_init(9600);
-  start_distance_sensor();
-  sei();
+void send_distance(uint16_t distance) {
+  uart_send_byte((distance & 0xFF00) >> 8);
+  uart_send_byte(distance & 0x00FF);
+}
 
-  uint16_t distance;
-  int numb;
-  while (1) {
-    if (rx_count == 0) {continue;}
-    uart_read();
-    distance = measure_distance();
-    for (numb = 0; distance >= 1000; ++numb, distance -= 1000)
-      ;
-    uart_send_byte(numb + '0');
-    for (numb = 0; distance >= 100; ++numb, distance -= 100)
-      ;
-    uart_send_byte(numb + '0');
-    for (numb = 0; distance >= 10; ++numb, distance -= 10)
-      ;
-    uart_send_byte(numb + '0');
-    for (numb = 0; distance >= 1; ++numb, --distance)
-      ;
-    uart_send_byte(numb + '0');
-    uart_send_byte('\n');
-    /*
-		uart_send_byte((distance & 0xFF00) >> 8);
-		uart_send_byte(distance & 0x00FF);
-		uart_send_byte('\n');
-    */
+void initialize_motors() {
+  //set all motor pins as output
+  DDRB |= (1 << EN_A) | (1 << EN_B) | (1 << DIR_A);
+  DDRD |= (1 << SPEED_A) | (1 << SPEED_B) | (1 << DIR_B);
+
+  // Turn on motor A & B (0 = on)
+  PORTB |= (1 << EN_A) | (1 << EN_B);
+
+  //set direction (1 = forward)
+  PORTB |= (1 << DIR_A);
+  PORTD |= (1 << DIR_B);
+
+  TCCR0A |= (0b10 << COM2A0) | (0b10 << COM2B0) | (0b01 << WGM20);  // Phase correct, TOP = 0xFF
+  TCCR0B |= (0 << WGM22) | (0b001 << CS20);                         //no presecaler
+}
+
+void kickstart_motors() {
+  OCR0A = 255;
+  OCR0B = 255;
+  _delay_ms(10);
+}
+
+//motor speed is between 175 and 255
+void set_motor_speed(uint8_t right_speed, uint8_t left_speed) {
+  OCR0A = right_speed;
+  OCR0B = left_speed;
+}
+
+//motor direction 1 is forward 0 is backwards
+void set_motor_direction(uint8_t direction) {
+  if (!direction) {
+    PORTB &= ~(1 << DIR_B);
+    PORTD &= ~(1 << DIR_A);
+
+    PORTB |= (1 << EN_A) | (1 << EN_B);
+
+    PORTB |= (1 << DIR_A);
+  } else {
+    PORTB &= ~(1 << EN_A) & ~(1 << EN_B) & ~(1 << DIR_A);
+
+    PORTB |= (1 << DIR_B);
+    PORTD |= (1 << DIR_A);
   }
 }
+
+void initialize_servo() {
+  DDRD |= (1 << SERVO);  // Set the Servo pin as an output
+
+  TCCR2A |= (0b01 << COM2A0) | (0b10 << COM2B0) | (0b01 << WGM20);  // Phase Correct PWM
+  TCCR2B |= (1 << WGM22) | (0b111 << CS20);                         // Prescale of 1024
+  OCR2A = 156;
+
+  set_servo_angle(SERVO_MED);
+}
+
+//servo andlge is between 4 and 20
+void set_servo_angle(uint8_t servo_angle) {
+  OCR2B = servo_angle;
+}
+
+int main(void) {
+  uart_init(9600);
+  initialize_distance_sensor();
+  initialize_motors();
+  initialize_servo();
+  sei();
+
+
+  uint16_t distance;
+  uint8_t data;
+  while (1) {
+    if (rx_count == 0) { continue; }
+    data = (uint8_t)uart_read();
+    uart_send_byte(data);
+    switch (data) {
+      case 10: set_motor_speed(0, 0); break;
+      case 11:
+        {
+          set_motor_direction(1);
+          kickstart_motors();
+          set_motor_speed(175, 175);
+          break;
+        }
+      case 12:
+        {
+          set_motor_direction(0);
+          kickstart_motors();
+          set_motor_speed(175, 175);
+          break;
+        }
+      case 13:
+        {
+          set_motor_direction(1);
+          kickstart_motors();
+          set_motor_speed(175, 0);
+          break;
+        }
+      case 14:
+        {
+          set_motor_direction(1);
+          kickstart_motors();
+          set_motor_speed(0, 175);
+          break;
+        }
+      case 20:
+        {
+          distance = measure_distance();
+          send_distance(distance);
+          break;
+        }
+      case 30:
+        {
+          set_servo_angle(SERVO_MIN);
+          break;
+        }
+      case 31:
+        {
+          set_servo_angle(SERVO_MED);
+          break;
+        }
+      case 32:
+        {
+          set_servo_angle(SERVO_MAX);
+          break;
+        }
+      //default:
+        //uart_send_byte(data);
+    }
+  }
+}
+

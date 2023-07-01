@@ -25,7 +25,7 @@ int main(void) {
     
     TCCR0A |= (0b10 << COM2A0) |(0b10 << COM2B0) | (0b01 << WGM20); // Phase correct, TOP = 0xFF
     TCCR0B |= (0 << WGM22) | (0b001 << CS20); //no presecaler
-    OCR0A = 255; 
+
     OCR0B = 255; 
     _delay_ms(50); 
     

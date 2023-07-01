@@ -9,13 +9,13 @@
 #define RX_BUFFER_SIZE 128
 
 //motors
-#define EN_A PB0       // pin 8
+#define DIR_L_B PB0    // pin 8
 #define SPEED_A PD5    // pin 5
-#define DIR_A PD7      // pin 7
+#define DIR_L_F PD7    // pin 7
 
-#define EN_B PB1       // pin 9
+#define DIR_R_B PB1    // pin 9
 #define SPEED_B PD6    // pin 6
-#define DIR_B PB3      // pin 11
+#define DIR_R_F PB3    // pin 11
 #define MIN_SPEED 180
 
 //servo
@@ -127,15 +127,15 @@ void send_distance(uint16_t distance) {
 
 void initialize_motors() {
     //set all motor pins as output
-    DDRB |= (1 << EN_A) | (1 << EN_B) | (1 << DIR_A);
-    DDRD |= (1 << SPEED_A) | (1 << SPEED_B) | (1 << DIR_B);
+    DDRB |= (1 << DIR_L_B) | (1 << DIR_R_B) | (1 << DIR_L_F);
+    DDRD |= (1 << SPEED_A) | (1 << SPEED_B) | (1 << DIR_R_F);
 
     // Turn on motor A & B (0 = on)
-    PORTB |= (1 << EN_A) | (1 << EN_B);
+    PORTB |= (1 << DIR_L_B) | (1 << DIR_R_B);
 
     //set direction (1 = forward)
-    PORTB |= (1 << DIR_A);
-    PORTD |= (1 << DIR_B);
+    PORTB |= (1 << DIR_L_F);
+    PORTD |= (1 << DIR_R_F);
 
     TCCR0A |= (0b10 << COM2A0) | (0b10 << COM2B0) | (0b01 << WGM20);    // Phase correct, TOP = 0xFF
     TCCR0B |= (0 << WGM22) | (0b001 << CS20);                           //no presecaler
@@ -148,35 +148,46 @@ void set_motor_speed(uint8_t right_speed, uint8_t left_speed) {
         OCR0B = 0;
         return;
     }
-    if ((OCR0B < MIN_SPEED && !left_speed) && (OCR0A < MIN_SPEED && !right_speed)){
+    if ((OCR0B < MIN_SPEED && left_speed) && (OCR0A < MIN_SPEED && right_speed)) {
         OCR0B = 255;
         OCR0A = 255;
-        _delay_ms(10);
-    } else if (OCR0A < MIN_SPEED && !right_speed) {
+
+    } else if (OCR0A < MIN_SPEED && right_speed) {
         OCR0A = 255;
-        _delay_ms(10);
-    } else if (OCR0B < MIN_SPEED && !left_speed) {
+    } else if (OCR0B < MIN_SPEED && left_speed) {
         OCR0B = 255;
-        _delay_ms(10);
     }
+    _delay_ms(10);
     OCR0A = right_speed;
     OCR0B = left_speed;
 }
 
 //motor direction 1 is forward 0 is backwards
-void set_motor_direction(uint8_t direction) {
-    if (!direction) {
-        PORTB &= ~(1 << DIR_B);
-        PORTD &= ~(1 << DIR_A);
+void set_motor_direction(uint8_t right, uint8_t left) {
+    /*
+    #define DIR_L_B PB0       // pin 8
+    #define SPEED_A PD5    // pin 5
+    #define DIR_L_F PD7      // pin 7
 
-        PORTB |= (1 << EN_A) | (1 << EN_B);
+    #define DIR_R_B PB1       // pin 9
+    #define SPEED_B PD6    // pin 6
+    #define DIR_R_F PB3      // pin 11
+    */
 
-        PORTB |= (1 << DIR_A);
-    } else {
-        PORTB &= ~(1 << EN_A) & ~(1 << EN_B) & ~(1 << DIR_A);
-
-        PORTB |= (1 << DIR_B);
-        PORTD |= (1 << DIR_A);
+    PORTB = 0;
+    PORTD = 0;
+    if (right && left) {
+        PORTB |= (1 << DIR_R_F);
+        PORTD |= (1 << DIR_L_F);
+    } else if (!right && !left) {
+        PORTB |= (1 << DIR_R_B);
+        PORTB |= (1 << DIR_L_B);
+    } else if (!right) {
+        PORTD |= (1 << DIR_L_F);
+        PORTB |= (1 << DIR_R_B);
+    } else if (!left) {
+        PORTB |= (1 << DIR_R_F);
+        PORTB |= (1 << DIR_L_B);
     }
 }
 
@@ -211,26 +222,27 @@ int main(void) {
             case 10: set_motor_speed(0, 0); break;
             case 11:
                 {
-                    set_motor_direction(1);
+                    uart_send_byte(1);
+                    set_motor_direction(1, 1);
                     set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 12:
                 {
-                    set_motor_direction(0);
+                    set_motor_direction(0, 0);
                     set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 13:
                 {
-                    set_motor_direction(1);
-                    set_motor_speed(carSpeed, 0);
+                    set_motor_direction(1, 0);
+                    set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 14:
                 {
-                    set_motor_direction(1);
-                    set_motor_speed(0, carSpeed);
+                    set_motor_direction(0, 1);
+                    set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 15:

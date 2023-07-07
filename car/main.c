@@ -222,7 +222,6 @@ int main(void) {
             case 10: set_motor_speed(0, 0); break;
             case 11:
                 {
-                    uart_send_byte(1);
                     set_motor_direction(1, 1);
                     set_motor_speed(carSpeed, carSpeed);
                     break;

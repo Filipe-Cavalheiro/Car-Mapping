@@ -16,7 +16,7 @@
 #define DIR_R_B PB1    // pin 9
 #define SPEED_B PD6    // pin 6
 #define DIR_R_F PB3    // pin 11
-#define MIN_SPEED 180
+#define MIN_SPEED 240
 
 //servo
 #define SERVO PD3
@@ -111,13 +111,18 @@ void initialize_distance_sensor() {
     PORTC &= ~(1 << TRIGPIN);    // Set trigger low
 }
 
-uint16_t measure_distance() {
-    PORTC &= ~(1 << TRIGPIN);
-    _delay_us(2);
-    PORTC |= (1 << TRIGPIN);     // Set trigger high
-    _delay_us(10);               // for 10uS
-    PORTC &= ~(1 << TRIGPIN);    // Set trigger low
-    return timer * 0.034 / 2;
+uint16_t measure_distance(uint8_t times) {
+    uint64_t sum = 0;
+    for(int i = 0; i < times; ++i){
+        PORTC &= ~(1 << TRIGPIN);
+        _delay_us(2);
+        PORTC |= (1 << TRIGPIN);     // Set trigger high
+        _delay_us(10);               // for 10uS
+        PORTC &= ~(1 << TRIGPIN);    // Set trigger low
+        sum += timer * 0.034 / 2;
+        delay(10);
+    }
+    return (sum >> (times/2));
 }
 
 void send_distance(uint16_t distance) {
@@ -164,18 +169,8 @@ void set_motor_speed(uint8_t right_speed, uint8_t left_speed) {
 
 //motor direction 1 is forward 0 is backwards
 void set_motor_direction(uint8_t right, uint8_t left) {
-    /*
-    #define DIR_L_B PB0       // pin 8
-    #define SPEED_A PD5    // pin 5
-    #define DIR_L_F PD7      // pin 7
-
-    #define DIR_R_B PB1       // pin 9
-    #define SPEED_B PD6    // pin 6
-    #define DIR_R_F PB3      // pin 11
-    */
-
-    PORTB = 0;
-    PORTD = 0;
+    PORTB &= ~(1 << DIR_L_B) & ~(1 << DIR_R_B) & ~(1 << DIR_R_F);
+    PORTD &= ~(1 << DIR_L_F);
     if (right && left) {
         PORTB |= (1 << DIR_R_F);
         PORTD |= (1 << DIR_L_F);
@@ -189,6 +184,31 @@ void set_motor_direction(uint8_t right, uint8_t left) {
         PORTB |= (1 << DIR_R_F);
         PORTB |= (1 << DIR_L_B);
     }
+}
+
+void stop_car() {
+    set_motor_speed(0, 0);
+    PORTB |= (1 << DIR_R_F);
+    PORTD |= (1 << DIR_L_F);
+    PORTB |= (1 << DIR_R_B);
+    PORTB |= (1 << DIR_L_B);
+}
+
+void increase_car_speed(uint8_t *carSpeed) {
+    *carSpeed += 10;
+    uart_send_byte(*carSpeed);
+    if (*carSpeed < MIN_SPEED) {    //it overflows so check for min
+        *carSpeed = 255;
+    }
+    return;
+}
+
+void decrease_car_speed(uint8_t *carSpeed) {
+    *carSpeed -= 10;
+    if (*carSpeed < MIN_SPEED) {
+        *carSpeed = MIN_SPEED;
+    }
+    return;
 }
 
 void initialize_servo() {
@@ -206,61 +226,105 @@ void set_servo_angle(uint8_t servo_angle) {
     OCR2B = servo_angle;
 }
 
+void find_wall(uint8_t *carSpeed) {
+    uint16_t distance = measure_distance(1);
+    if (distance < 300) return;
+    while (distance >= 300) {
+        set_motor_speed(*carSpeed, *carSpeed);
+        set_motor_direction(1, 1);
+        _delay_ms(100);
+        stop_car();
+        distance = measure_distance(1);
+    }
+}
+
+void get_perpendicular(uint8_t *carSpeed) {
+    uint16_t left_45 = 1000, right_45 = 0;
+    uint16_t last_left = 0, last_right = 1000;
+
+    while (1) {
+        set_servo_angle(15);
+        uint16_t left_45 = measure_distance(10);
+        send_distance(left_45);
+        _delay_ms(500);
+        set_servo_angle(8);
+        uint16_t right_45 = measure_distance(10);
+        send_distance(right_45);
+        _delay_ms(500);
+        if((left_45 - right_45) < 50) break;
+        if((right_45 - left_45) < 50) break;
+
+        if ((((right_45 - last_right) < 100) && ((left_45 - last_left) < 100)) && (((last_right - right_45) < 100) && ((last_left - left_45) < 100)))
+            increase_car_speed(carSpeed);
+        last_right = right_45;
+        last_left = left_45;
+
+        if (left_45 > right_45){
+            set_motor_speed(*carSpeed, *carSpeed);
+            set_motor_direction(0, 1);
+        } else {
+            set_motor_speed(*carSpeed, *carSpeed);
+            set_motor_direction(1, 0);
+        }
+        _delay_ms(500);
+        stop_car();
+    }
+    set_servo_angle(SERVO_MED);
+    return;
+}
+
 int main(void) {
     uart_init(9600);
     initialize_distance_sensor();
     initialize_motors();
     initialize_servo();
     sei();
+    _delay_ms(1000);
+    uint8_t data = 0;
+    uint8_t carSpeed = (uint8_t)MIN_SPEED;
 
-    uint8_t data;
-    uint8_t carSpeed = 180;
+    stop_car();
+    //find_wall(&carSpeed);
+    get_perpendicular(&carSpeed);
     while (1) {
+        set_motor_speed(carSpeed, carSpeed);
         if (rx_count == 0) { continue; }
         data = uart_read();
         switch (data) {
-            case 10: set_motor_speed(0, 0); break;
+            case 10: stop_car(); break;
             case 11:
                 {
                     set_motor_direction(1, 1);
-                    set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 12:
                 {
                     set_motor_direction(0, 0);
-                    set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 13:
                 {
                     set_motor_direction(1, 0);
-                    set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 14:
                 {
                     set_motor_direction(0, 1);
-                    set_motor_speed(carSpeed, carSpeed);
                     break;
                 }
             case 15:
                 {
-                    carSpeed += 10;
-                    if (carSpeed < MIN_SPEED)    //it overflows so check for min
-                        carSpeed = 255;
+                    increase_car_speed(&carSpeed);
                     break;
                 }
             case 16:
                 {
-                    carSpeed -= 10;
-                    if (carSpeed < MIN_SPEED)
-                        carSpeed = MIN_SPEED;
+                    decrease_car_speed(&carSpeed);
                     break;
                 }
             case 20:
                 {
-                    send_distance(measure_distance());
+                    send_distance(measure_distance(10));
                     break;
                 }
             case 30:
